@@ -1,0 +1,69 @@
+import re
+def parse_mesh_input(user_input):
+    """Convert mesh size input with units (k, m, mill, million) to integer cells."""
+    text = user_input.lower().replace(" ", "")
+    match = re.match(r"(\d+\.?\d*)([a-z]*)", text)
+    
+    if not match:
+        raise ValueError("Invalid input format.")
+
+    number = float(match.group(1))
+    unit = match.group(2)
+
+    if unit in ["k", "thousand"]:
+        return int(number * 1_000)
+    elif unit in ["m", "mill", "mil", "million"]:
+        return int(number * 1_000_000)
+    elif unit == "":
+        return int(number)  # raw number
+    else:
+        raise ValueError("Unknown unit. Use k, m, mill, million, or no unit.")
+
+
+
+def calc_resources(elements):
+    # RAM per million cells (GB)
+    ram_low, ram_high = 2, 5  # min & max estimate
+
+    # Recommended points per core range
+    points_per_core_low, points_per_core_high = 50_000, 100_000
+
+    scenarios = {
+        "Conservative": points_per_core_high,  # fewer cores, more points/core
+        "Recommended": (points_per_core_low + points_per_core_high) / 2,
+        "Aggressive": points_per_core_low,     # more cores, fewer points/core
+    }
+
+    results = {}
+    for name, ppc in scenarios.items():
+        cores = max(2, round(elements / ppc))  # at least 2 cores
+        total_ram_low = max(2, (elements / 1e6) * ram_low)   # GB, min 2 GB
+        total_ram_high = max(2, (elements / 1e6) * ram_high)
+
+        # Pick mid-RAM estimate for mem-per-cpu calculation
+        total_ram_mid = (total_ram_low + total_ram_high) / 2
+        ram_per_core = max(1, total_ram_mid / cores)  # at least 1 GB/core
+
+        results[name] = {
+            "cores": cores,
+            "total_ram_low": total_ram_low,
+            "total_ram_high": total_ram_high,
+            "ram_per_core": ram_per_core,
+            "slurm_flag": f"#SBATCH --mem-per-cpu={ram_per_core:.1f}GB"
+        }
+
+    return results
+
+
+if __name__ == "__main__":
+    mesh_input = input("Enter mesh elements (e.g., '100k', '11mill'): ")
+    elements = parse_mesh_input(mesh_input)
+    res = calc_resources(elements)
+
+    print(f"\nEstimated resources for {elements:,.0f} elements:\n")
+    for scenario, data in res.items():
+        print(f"{scenario}:")
+        print(f"  Cores: {data['cores']}")
+        print(f"  Total RAM: {data['total_ram_low']:.1f}–{data['total_ram_high']:.1f} GB")
+        print(f"  RAM/Core: {data['ram_per_core']:.1f} GB")
+        print(f"  Slurm: {data['slurm_flag']}\n")
